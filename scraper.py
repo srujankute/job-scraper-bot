@@ -266,7 +266,15 @@ today_jobs = [job for job in new_jobs if job.get('posted_date', today) == today]
 print(f"📅 Jobs posted today: {len(today_jobs)}")
 
 if len(today_jobs) == 0:
-    print("✅ No new jobs posted today. Skipping notifications.")
+    print("✅ No new jobs posted today. Sending notification.")
+    no_jobs_message = f"""
+❌ **No Job Openings Today**
+📅 **Date:** {today}
+⏰ **Checked:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+
+No new job openings were found across all sources today. Better luck next time!
+"""
+    send_discord_message(no_jobs_message.strip())
 else:
     for job in today_jobs:
         job_id = create_job_id(job)
