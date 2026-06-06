@@ -2,22 +2,19 @@ import requests
 import json
 import os
 
-# We changed this to matching TELEGRAM_TOKEN
-BOT_TOKEN = os.environ.get('TELEGRAM_TOKEN')
-CHAT_ID = os.environ.get('TELEGRAM_CHAT_ID')
+DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 URL = "https://www.amazon.jobs/en/search.json?base_query=Data+Analyst&loc_query=India"
 FILE_NAME = "sent_jobs.json"
 
-def send_telegram_message(message):
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {'chat_id': CHAT_ID, 'text': message}
+def send_discord_message(message):
+    payload = {'content': message}
     try:
-        response = requests.post(url, data=payload, timeout=10)
-        # This line forces Python to crash if the Telegram token or Chat ID is wrong
-        response.raise_for_status() 
+        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+        response.raise_for_status()
+        print("✓ Message sent to Discord successfully")
     except Exception as e:
-        print(f"Telegram API Error: {e}")
-        raise e  # Stops the script so GitHub Actions shows a red error if it fails
+        print(f"Discord API Error: {e}")
+        raise e
 
 def get_jobs():
     try:
@@ -53,10 +50,9 @@ for job in new_jobs:
         location = job.get('location', 'Unknown Location')
         path = job.get('job_path', '')
         
-        message = f"New Job Found: {title}\nLocation: {location}\nLink: https://amazon.jobs{path}"
+        message = f"🎯 **New Job Found**\n**Title:** {title}\n**Location:** {location}\n**Link:** https://amazon.jobs{path}"
         
-        # This will only add the job to sent_jobs.json if Telegram successfully delivers it
-        send_telegram_message(message)
+        send_discord_message(message)
         
         sent_jobs.append(job_id)
         jobs_found.append(job_id)
