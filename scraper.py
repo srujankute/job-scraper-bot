@@ -1,20 +1,35 @@
 import requests
 import json
 import os
+import time
 
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 URL = "https://www.amazon.jobs/en/search.json?base_query=Data+Analyst&loc_query=India"
 FILE_NAME = "sent_jobs.json"
 
-def send_discord_message(message):
+def send_discord_message(message, max_retries=3):
     payload = {'content': message}
-    try:
-        response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
-        response.raise_for_status()
-        print("✓ Message sent to Discord successfully")
-    except Exception as e:
-        print(f"Discord API Error: {e}")
-        raise e
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(DISCORD_WEBHOOK_URL, json=payload, timeout=10)
+            response.raise_for_status()
+            print("✓ Message sent to Discord successfully")
+            return True
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 429:
+                # Rate limited - extract retry-after header or use exponential backoff
+                retry_after = int(response.headers.get('Retry-After', 2 ** attempt))
+                print(f"Rate limited. Retrying after {retry_after} seconds...")
+                time.sleep(retry_after)
+            else:
+                print(f"Discord API Error: {e}")
+                raise e
+        except Exception as e:
+            print(f"Discord API Error: {e}")
+            raise e
+    
+    print("Failed to send message after max retries")
+    return False
 
 def get_jobs():
     try:
@@ -52,10 +67,12 @@ for job in new_jobs:
         
         message = f"🎯 **New Job Found**\n**Title:** {title}\n**Location:** {location}\n**Link:** https://amazon.jobs{path}"
         
-        send_discord_message(message)
+        if send_discord_message(message):
+            sent_jobs.append(job_id)
+            jobs_found.append(job_id)
         
-        sent_jobs.append(job_id)
-        jobs_found.append(job_id)
+        # Add delay between messages to avoid rate limiting
+        time.sleep(1)
 
 # Save history only if everything succeeded
 with open(FILE_NAME, 'w') as f:
