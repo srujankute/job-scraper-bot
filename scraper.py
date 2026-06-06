@@ -14,17 +14,18 @@ def send_telegram_message(message):
 def get_jobs():
     response = requests.get(URL)
     if response.status_code == 200:
-        return response.json().get('jobs', [])
-    return []
+        return response.json().get('jobs',)
+    return
 
+# Load already sent jobs to prevent duplicate messages
 if os.path.exists('sent_jobs.json'):
     with open('sent_jobs.json', 'r') as f:
         sent_jobs = json.load(f)
 else:
-    sent_jobs = []
+    sent_jobs =
 
 new_jobs = get_jobs()
-jobs_found = [] # This is what was missing on your line 43
+jobs_found =
 
 for job in new_jobs:
     job_id = str(job['id'])
@@ -34,6 +35,7 @@ for job in new_jobs:
         sent_jobs.append(job_id)
         jobs_found.append(job_id)
 
+# Save the updated list back to sent_jobs.json
 with open('sent_jobs.json', 'w') as f:
     json.dump(sent_jobs, f)
 
