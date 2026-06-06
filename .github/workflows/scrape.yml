@@ -1,9 +1,9 @@
 name: Daily Job Scraper Bot
 
 on:
+  workflow_dispatch: # Allows you to click "Run workflow" manually
   schedule:
-    - cron: '0 8 * * *'
-  workflow_dispatch: # This adds the manual "Run" button
+    - cron: "0 */6 * * *" # Automatically runs every 6 hours
 
 jobs:
   run-scraper:
@@ -12,10 +12,10 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Python
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
+          python-version: '3.10'
 
       - name: Install Dependencies
         run: |
@@ -30,7 +30,8 @@ jobs:
 
       - name: Commit and Push Changes
         run: |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add sent_jobs.json
-          git diff --quiet && git diff --staged --quiet || (git commit -m "Update sent jobs log" && git push)
+          # This line ensures it only commits if a new job was actually added to the file
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update sent jobs list" && git push)
