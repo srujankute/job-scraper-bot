@@ -1,9 +1,9 @@
 name: Daily Job Scraper Bot
 
 on:
-  workflow_dispatch: # Allows you to click "Run workflow" manually
+  workflow_dispatch:
   schedule:
-    - cron: "0 */6 * * *" # Automatically runs every 6 hours
+    - cron: "0 */6 * * *"
 
 jobs:
   run-scraper:
@@ -24,7 +24,7 @@ jobs:
 
       - name: Run Scraper
         env:
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scraper.py
 
@@ -33,5 +33,4 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add sent_jobs.json
-          # This line ensures it only commits if a new job was actually added to the file
           git diff --quiet && git diff --staged --quiet || (git commit -m "Update sent jobs list" && git push)
