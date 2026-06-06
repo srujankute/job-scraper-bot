@@ -2,12 +2,11 @@ import requests
 import json
 import os
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 
 DISCORD_WEBHOOK_URL = os.environ.get('DISCORD_WEBHOOK_URL')
 FILE_NAME = "sent_jobs.json"
 
-# Job sources with URLs and parsing logic
 JOB_SOURCES = {
     "Amazon": {
         "url": "https://www.amazon.jobs/en/search.json?base_query=Data+Analyst&loc_query=India",
@@ -15,7 +14,7 @@ JOB_SOURCES = {
         "base_url": "https://amazon.jobs"
     },
     "Google": {
-        "url": "https://www.google.com/careers/jobs/results/?location=India",
+        "url": "https://www.google.com/careers/jobs/?location=India",
         "parser": "google_careers",
         "base_url": "https://google.com/careers/jobs"
     },
@@ -30,7 +29,7 @@ JOB_SOURCES = {
         "base_url": "https://careers.microsoft.com"
     },
     "Apple": {
-        "url": "https://jobs.apple.com/en-us/search?team=INTERNSHIPS-UNIVERSITY",
+        "url": "https://jobs.apple.com/en-us/search",
         "parser": "apple_careers",
         "base_url": "https://jobs.apple.com"
     },
@@ -117,7 +116,12 @@ def get_amazon_jobs():
         response = requests.get(url, timeout=10)
         if response.status_code == 200:
             jobs = response.json().get('jobs', [])
-            return [{"company": "Amazon", **job} for job in jobs]
+            # Add company and posting date
+            for job in jobs:
+                job['company'] = 'Amazon'
+                # Use current date as posting date if not available
+                job['posted_date'] = job.get('posted_date', datetime.now().strftime('%Y-%m-%d'))
+            return jobs
     except Exception as e:
         print(f"Amazon scraper error: {e}")
     return []
@@ -135,13 +139,14 @@ def get_generic_jobs(company_name):
         response = requests.get(source["url"], headers=headers, timeout=10)
         
         if response.status_code == 200:
-            # Note: Generic HTML parsing requires BeautifulSoup
-            # For now, we'll attempt JSON API if available
             try:
                 data = response.json()
                 if isinstance(data, dict) and 'jobs' in data:
                     jobs = data.get('jobs', [])
-                    return [{"company": company_name, **job} for job in jobs]
+                    for job in jobs:
+                        job['company'] = company_name
+                        job['posted_date'] = job.get('posted_date', datetime.now().strftime('%Y-%m-%d'))
+                    return jobs
             except:
                 print(f"No JSON data available for {company_name}. Consider adding custom parser.")
     except Exception as e:
@@ -177,6 +182,7 @@ def format_job_message(job):
     title = job.get('title', job.get('position', 'Unknown Title'))
     location = job.get('location', job.get('loc_query', 'Unknown Location'))
     company = job.get('company', 'Unknown Company')
+    posted_date = job.get('posted_date', datetime.now().strftime('%Y-%m-%d'))
     
     # Try to construct job link
     job_path = job.get('job_path', job.get('path', ''))
@@ -191,43 +197,99 @@ def format_job_message(job):
 💼 **Title:** {title}
 📍 **Location:** {location}
 🔗 **Link:** {link}
-⏰ **Posted:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+📅 **Posted:** {posted_date}
+⏰ **Checked:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
 """
     return message.strip()
 
-# Load History
-if os.path.exists(FILE_NAME):
-    with open(FILE_NAME, 'r') as f:
+def create_job_id(job):
+    """Create unique job ID combining company, title, and date"""
+    company = job.get('company', 'unknown')
+    job_id = job.get('id', job.get('title', 'unknown'))
+    posted_date = job.get('posted_date', datetime.now().strftime('%Y-%m-%d'))
+    return f"{company}_{job_id}_{posted_date}"
+
+def load_sent_jobs():
+    """Load previously sent jobs"""
+    if os.path.exists(FILE_NAME):
+        with open(FILE_NAME, 'r') as f:
+            try:
+                data = json.load(f)
+                # Support both old format (list) and new format (dict with metadata)
+                if isinstance(data, dict) and 'sent_jobs' in data:
+                    return data
+                else:
+                    return {'sent_jobs': data, 'last_check': None}
+            except json.JSONDecodeError:
+                return {'sent_jobs': [], 'last_check': None}
+    return {'sent_jobs': [], 'last_check': None}
+
+def save_sent_jobs(sent_jobs_data):
+    """Save sent jobs with metadata"""
+    with open(FILE_NAME, 'w') as f:
+        json.dump(sent_jobs_data, f, indent=2)
+
+def clean_old_jobs(sent_jobs_data, days=7):
+    """Remove jobs older than specified days to keep file size manageable"""
+    today = datetime.now().strftime('%Y-%m-%d')
+    today_date = datetime.strptime(today, '%Y-%m-%d')
+    cutoff_date = today_date - timedelta(days=days)
+    
+    cleaned_jobs = []
+    for job_id in sent_jobs_data['sent_jobs']:
+        # Extract date from job_id (format: company_id_YYYY-MM-DD)
         try:
-            sent_jobs = json.load(f)
-        except json.JSONDecodeError:
-            sent_jobs = []
-else:
-    sent_jobs = []
+            date_str = job_id.split('_')[-1]
+            job_date = datetime.strptime(date_str, '%Y-%m-%d')
+            if job_date >= cutoff_date:
+                cleaned_jobs.append(job_id)
+        except:
+            # Keep jobs we can't parse the date from
+            cleaned_jobs.append(job_id)
+    
+    return cleaned_jobs
+
+# Load History
+sent_jobs_data = load_sent_jobs()
+sent_jobs = sent_jobs_data.get('sent_jobs', [])
+last_check = sent_jobs_data.get('last_check')
 
 new_jobs = get_all_jobs()
 jobs_found = []
 
 print(f"\n📊 Fetched {len(new_jobs)} total jobs from all sources.")
 
-for job in new_jobs:
-    job_id = str(job.get('id', job.get('company', '') + str(job.get('title', ''))))
-    if not job_id:
-        continue
-        
-    if job_id not in sent_jobs:
-        message = format_job_message(job)
-        
-        if send_discord_message(message):
-            sent_jobs.append(job_id)
-            jobs_found.append(job_id)
-        
-        # Add delay between messages to avoid rate limiting
-        time.sleep(1)
+today = datetime.now().strftime('%Y-%m-%d')
 
-# Save history
-with open(FILE_NAME, 'w') as f:
-    json.dump(sent_jobs, f)
+# Only process jobs posted today
+today_jobs = [job for job in new_jobs if job.get('posted_date', today) == today]
+print(f"📅 Jobs posted today: {len(today_jobs)}")
+
+if len(today_jobs) == 0:
+    print("✅ No new jobs posted today. Skipping notifications.")
+else:
+    for job in today_jobs:
+        job_id = create_job_id(job)
+        
+        if job_id not in sent_jobs:
+            message = format_job_message(job)
+            
+            if send_discord_message(message):
+                sent_jobs.append(job_id)
+                jobs_found.append(job_id)
+            
+            # Add delay between messages to avoid rate limiting
+            time.sleep(1)
+
+# Clean old jobs (keep only last 7 days)
+sent_jobs = clean_old_jobs({'sent_jobs': sent_jobs}, days=7)
+
+# Save history with metadata
+sent_jobs_data = {
+    'sent_jobs': sent_jobs,
+    'last_check': datetime.now().isoformat()
+}
+save_sent_jobs(sent_jobs_data)
 
 print(f"\n✅ Scraper finished. Successfully sent {len(jobs_found)} new job alerts.")
-print(f"📈 Total unique jobs tracked: {len(sent_jobs)}")
+print(f"📈 Total unique jobs tracked (last 7 days): {len(sent_jobs)}")
