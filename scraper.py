@@ -23,10 +23,10 @@ def get_jobs():
     try:
         response = requests.get(URL)
         if response.status_code == 200:
-            return response.json().get('jobs',)
+            return response.json().get('jobs', [])
     except Exception as e:
         print(f"Scraper Error: {e}")
-    return
+    return []
 
 # Load History
 if os.path.exists(FILE_NAME):
@@ -34,12 +34,12 @@ if os.path.exists(FILE_NAME):
         try:
             sent_jobs = json.load(f)
         except json.JSONDecodeError:
-            sent_jobs =
+            sent_jobs = []
 else:
-    sent_jobs =
+    sent_jobs = []
 
 new_jobs = get_jobs()
-jobs_found =
+jobs_found = []
 
 print(f"Fetched {len(new_jobs)} jobs from Amazon Careers.")
 
