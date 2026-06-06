@@ -1,0 +1,43 @@
+name: Daily Job Scraper Bot
+
+on:
+  schedule:
+    # Runs automatically every day at 8:00 AM UTC (1:30 PM Indian Standard Time)
+    - cron: '0 8 * * *'
+  workflow_dispatch: # This adds a manual "Run" button in GitHub so you can test it anytime
+
+jobs:
+  run-scraper:
+    runs-on: ubuntu-latest
+    steps:
+      # Step 1: Copy your files to the temporary GitHub server
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # Step 2: Install Python
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Step 3: Install the requests library used to get web data
+      - name: Install Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install requests
+
+      # Step 4: Run your scraper.py script
+      - name: Run Scraper
+        env:
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scraper.py
+
+      # Step 5: Save the notified_jobs.json file back to your repository
+      - name: Commit and Push Changes
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add notified_jobs.json
+          # Only commit and push if the notified_jobs.json file has actually changed
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update sent jobs log [skip ci]" && git push)
