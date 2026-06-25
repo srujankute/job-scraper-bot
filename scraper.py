@@ -196,6 +196,9 @@ COMPANY_PATTERNS = [(re.compile(r"\b" + re.escape(k) + r"\b", re.IGNORECASE), v)
 
 def send_discord_message(message, max_retries=3):
     """Send message to Discord with retry logic for rate limiting"""
+    if not DISCORD_WEBHOOK_URL:
+        print("No DISCORD_WEBHOOK_URL configured; skipping Discord send.")
+        return False
     payload = {'content': message}
     for attempt in range(max_retries):
         try:
@@ -336,6 +339,24 @@ def job_matches(job):
     return False
 
 
+def parse_posted_date(date_str):
+    """Try to parse posted_date string into a datetime.date; fallback to today."""
+    if not date_str:
+        return datetime.now().date()
+    # Try common date formats
+    formats = ['%Y-%m-%d', '%d-%m-%Y', '%d/%m/%Y', '%Y/%m/%d']
+    for f in formats:
+        try:
+            return datetime.strptime(date_str.strip(), f).date()
+        except Exception:
+            continue
+    # Try ISO parse
+    try:
+        return datetime.fromisoformat(date_str).date()
+    except Exception:
+        return datetime.now().date()
+
+
 def format_job_message(job):
     """Format job details for Discord message"""
     title = job.get('title', job.get('position', 'Unknown Title'))
@@ -362,10 +383,19 @@ def format_job_message(job):
     return message.strip()
 
 
+def format_job_short_line(job):
+    """Return a compact one-line summary for the listing message"""
+    title = job.get('title', job.get('position', 'Unknown Title'))
+    company = job.get('company', 'Unknown Company')
+    posted_date = job.get('posted_date', datetime.now().strftime('%Y-%m-%d'))
+    link = JOB_SOURCES.get(job.get('company'), {}).get('base_url', job.get('url', '#'))
+    return f"- {posted_date} | {company} | {title} | {link}"
+
+
 def create_job_id(job):
     """Create unique job ID combining company, title, and date"""
     company = job.get('company', 'unknown')
-    job_id = job.get('id', job.get('title', 'unknown')).replace(' ', '_')
+    job_id = str(job.get('id', job.get('title', 'unknown'))).replace(' ', '_')
     posted_date = job.get('posted_date', datetime.now().strftime('%Y-%m-%d'))
     return f"{company}_{job_id}_{posted_date}"
 
@@ -427,34 +457,44 @@ print(f"\n📊 Fetched {len(new_jobs)} total jobs from all sources.")
 matched_jobs = [job for job in new_jobs if job_matches(job)]
 print(f"🔎 Jobs matching requested companies & keywords: {len(matched_jobs)}")
 
-# Only process jobs posted today (you can relax this if you want a wider window)
-today = datetime.now().strftime('%Y-%m-%d')
-today_jobs = [job for job in matched_jobs if job.get('posted_date', today) == today]
-print(f"📅 Jobs posted today (after filtering): {len(today_jobs)}")
+# Parse and normalize posted_date for sorting; default to today if missing
+for job in matched_jobs:
+    job['posted_date'] = job.get('posted_date') or datetime.now().strftime('%Y-%m-%d')
+    # try to normalize formats
+    try:
+        parsed = parse_posted_date(str(job['posted_date']))
+        job['_parsed_date'] = parsed
+        # store normalized string
+        job['posted_date'] = parsed.strftime('%Y-%m-%d')
+    except Exception:
+        job['_parsed_date'] = datetime.now().date()
+        job['posted_date'] = datetime.now().strftime('%Y-%m-%d')
 
-if len(today_jobs) == 0:
-    print("✅ No new jobs posted today. Sending notification.")
-    no_jobs_message = f"""
- ❌ **No Job Openings Today**
- 📅 **Date:** {today}
- ⏰ **Checked:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+# Sort by parsed_date descending (newest first). Change reverse=False if you want oldest-first.
+matched_jobs.sort(key=lambda j: j.get('_parsed_date', datetime.now().date()), reverse=True)
 
- No new job openings were found across all requested companies and keywords today. Better luck next time!
- """
-    send_discord_message(no_jobs_message.strip())
+# Build and send a single summary message listing all matched jobs (duplicates allowed)
+if matched_jobs:
+    summary_lines = [f"🔔 Job Listings — total: {len(matched_jobs)}\n"]
+    for job in matched_jobs:
+        summary_lines.append(format_job_short_line(job))
+    summary_message = "\n".join(summary_lines)
+    send_discord_message(summary_message)
+    time.sleep(1)
 else:
-    for job in today_jobs:
-        job_id = create_job_id(job)
-        
-        if job_id not in sent_jobs:
-            message = format_job_message(job)
-            
-            if send_discord_message(message):
-                sent_jobs.append(job_id)
-                jobs_found.append(job_id)
-            
-            # Add delay between messages to avoid rate limiting
-            time.sleep(1)
+    print("No matched jobs to list in summary.")
+
+# Now send individual alerts for each matched job (duplicates allowed per your request)
+for job in matched_jobs:
+    job_id = create_job_id(job)
+
+    # Send alert (we do not suppress duplicates per your instruction)
+    message = format_job_message(job)
+    if send_discord_message(message):
+        jobs_found.append(job_id)
+        # Record it in history for bookkeeping
+        sent_jobs.append(job_id)
+    time.sleep(1)
 
 # Clean old jobs (keep only last 7 days)
 sent_jobs = clean_old_jobs({'sent_jobs': sent_jobs}, days=7)
@@ -466,5 +506,5 @@ sent_jobs_data = {
 }
 save_sent_jobs(sent_jobs_data)
 
-print(f"\n✅ Scraper finished. Successfully sent {len(jobs_found)} new job alerts.")
+print(f"\n✅ Scraper finished. Successfully sent {len(jobs_found)} job alerts.")
 print(f"📈 Total unique jobs tracked (last 7 days): {len(sent_jobs)}")
